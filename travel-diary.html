@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Cestovní deník</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1612;
+    --paper: #f5f0e8;
+    --aged: #e8dfc8;
+    --rust: #b85c38;
+    --gold: #c9a84c;
+    --faded: #8a7e6e;
+    --green: #3d6b4f;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 27px, rgba(139,125,100,0.15) 27px, rgba(139,125,100,0.15) 28px);
+    background-size: 100% 28px;
+  }
+
+  .container { max-width: 480px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  header { text-align: center; margin-bottom: 28px; padding-top: 16px; }
+
+  .title {
+    font-family: 'Playfair Display', serif;
+    font-size: 28px; font-style: italic;
+    color: var(--ink); letter-spacing: 0.02em; line-height: 1.2;
+  }
+  .subtitle { font-size: 10px; color: var(--faded); letter-spacing: 0.2em; text-transform: uppercase; margin-top: 4px; }
+
+  .divider { display: flex; align-items: center; gap: 10px; margin: 12px 0; color: var(--gold); font-size: 12px; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: linear-gradient(to right, transparent, var(--gold), transparent); }
+
+  .status-bar {
+    background: rgba(255,255,255,0.5);
+    border: 1px solid var(--aged);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-bottom: 24px;
+    font-size: 11px;
+    color: var(--faded);
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faded); display: inline-block; margin-right: 6px; transition: background 0.3s; }
+  .status-dot.ok { background: var(--green); }
+  .status-dot.error { background: var(--rust); }
+
+  .recorder-area { text-align: center; margin: 28px 0; }
+
+  .record-btn {
+    width: 88px; height: 88px; border-radius: 50%;
+    border: 3px solid var(--rust); background: white; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: all 0.25s; box-shadow: 0 4px 20px rgba(184,92,56,0.2);
+  }
+  .record-btn:hover { box-shadow: 0 6px 28px rgba(184,92,56,0.35); transform: scale(1.04); }
+  .record-btn.recording { background: var(--rust); border-color: var(--rust); animation: pulse 1.4s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(184,92,56,0.5); }
+    50% { box-shadow: 0 0 0 16px rgba(184,92,56,0); }
+  }
+
+  .mic-icon { width: 32px; height: 32px; fill: var(--rust); transition: fill 0.25s; }
+  .record-btn.recording .mic-icon { fill: white; }
+
+  .record-label { display: block; margin-top: 12px; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--faded); }
+
+  .live-transcript {
+    min-height: 70px; background: rgba(255,255,255,0.6);
+    border: 1px dashed var(--aged); border-radius: 4px;
+    padding: 12px 14px; font-family: 'Playfair Display', serif;
+    font-size: 14px; line-height: 1.6; color: var(--ink); font-style: italic;
+    margin: 16px 0; transition: border-color 0.3s;
+  }
+  .live-transcript.active { border-color: var(--rust); border-style: solid; }
+  .live-transcript .placeholder { color: var(--faded); font-size: 12px; font-style: normal; font-family: 'DM Mono', monospace; }
+
+  .btn-save {
+    width: 100%; background: var(--ink); color: var(--paper); border: none;
+    border-radius: 4px; padding: 13px; font-family: 'DM Mono', monospace;
+    font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+    cursor: pointer; transition: all 0.2s; margin-bottom: 8px;
+  }
+  .btn-save:hover { background: #2d2620; }
+  .btn-save:active { transform: scale(0.99); }
+  .btn-save:disabled { background: var(--faded); cursor: default; }
+
+  .entries-header { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faded); margin: 28px 0 12px; display: flex; align-items: center; gap: 10px; }
+  .entries-header::after { content: ''; flex: 1; height: 1px; background: var(--aged); }
+
+  .entry-card {
+    background: rgba(255,255,255,0.55); border-left: 3px solid var(--gold);
+    padding: 12px 14px; margin-bottom: 10px; border-radius: 0 4px 4px 0;
+    animation: slideIn 0.3s ease;
+  }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+  .entry-meta { font-size: 10px; color: var(--faded); margin-bottom: 6px; letter-spacing: 0.08em; }
+  .entry-text { font-family: 'Playfair Display', serif; font-size: 14px; line-height: 1.65; color: var(--ink); }
+  .entry-synced { font-size: 10px; color: var(--green); margin-top: 6px; }
+  .entry-error { font-size: 10px; color: var(--rust); margin-top: 6px; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--ink); color: var(--paper); padding: 10px 20px;
+    border-radius: 4px; font-size: 12px; letter-spacing: 0.08em;
+    transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1); z-index: 100; white-space: nowrap;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="title">Cestovní deník</div>
+    <div class="subtitle">Hlasové záznamy · Google Docs</div>
+    <div class="divider">✦</div>
+  </header>
+
+  <div class="status-bar">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">Připojuji…</span>
+  </div>
+
+  <div class="recorder-area">
+    <button class="record-btn" id="recordBtn" onclick="toggleRecording()">
+      <svg class="mic-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v6a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm7 7a1 1 0 0 1 1 1 8 8 0 0 1-7 7.938V21h2a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2h2v-2.062A8 8 0 0 1 4 11a1 1 0 0 1 2 0 6 6 0 0 0 12 0 1 1 0 0 1 1-1z"/>
+      </svg>
+    </button>
+    <span class="record-label" id="recordLabel">Klepni pro nahrávání</span>
+  </div>
+
+  <div class="live-transcript" id="liveTranscript">
+    <span class="placeholder">Přepis se zobrazí zde…</span>
+  </div>
+
+  <button class="btn-save" id="btnSave" onclick="saveEntry()" disabled>
+    Uložit záznam do Google Docs
+  </button>
+
+  <div class="entries-header">Dnešní záznamy</div>
+  <div id="entriesList"></div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzz7AHVe-0NhN7Rziw92ZHjfxFkVpv-Kc-dRrXfQO6b7-QCqeCk7UPYznGKfYQQGLAo/exec';
+
+let recognition = null;
+let isRecording = false;
+let finalTranscript = '';
+let interimTranscript = '';
+let entries = JSON.parse(localStorage.getItem('diaryEntries') || '[]');
+
+window.onload = () => {
+  renderEntries();
+  checkSpeechSupport();
+  setStatus(true, 'Připojeno k Google Docs ✓');
+};
+
+function checkSpeechSupport() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    document.getElementById('recordBtn').style.opacity = '0.4';
+    document.getElementById('recordLabel').textContent = 'Prohlížeč nepodporuje nahrávání';
+    showToast('Použij Chrome nebo Samsung Internet');
+  }
+}
+
+function setStatus(ok, text) {
+  document.getElementById('statusDot').className = 'status-dot ' + (ok ? 'ok' : 'error');
+  document.getElementById('statusText').textContent = text;
+}
+
+function toggleRecording() {
+  isRecording ? stopRecording() : startRecording();
+}
+
+function startRecording() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return;
+
+  finalTranscript = '';
+  interimTranscript = '';
+
+  recognition = new SpeechRecognition();
+  recognition.lang = 'cs-CZ';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (e) => {
+    interimTranscript = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        finalTranscript += e.results[i][0].transcript + ' ';
+      } else {
+        interimTranscript += e.results[i][0].transcript;
+      }
+    }
+    updateTranscriptDisplay();
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error !== 'no-speech') showToast('Chyba: ' + e.error);
+    stopRecording();
+  };
+
+  recognition.onend = () => {
+    if (isRecording) recognition.start();
+  };
+
+  recognition.start();
+  isRecording = true;
+  document.getElementById('recordBtn').classList.add('recording');
+  document.getElementById('recordLabel').textContent = 'Nahrávám… klepni pro stop';
+  document.getElementById('liveTranscript').classList.add('active');
+}
+
+function stopRecording() {
+  if (recognition) { recognition.stop(); recognition = null; }
+  isRecording = false;
+  document.getElementById('recordBtn').classList.remove('recording');
+  document.getElementById('recordLabel').textContent = 'Klepni pro nahrávání';
+  document.getElementById('liveTranscript').classList.remove('active');
+  if (finalTranscript.trim()) {
+    document.getElementById('btnSave').disabled = false;
+  }
+}
+
+function updateTranscriptDisplay() {
+  const el = document.getElementById('liveTranscript');
+  const combined = finalTranscript + (interimTranscript
+    ? '<em style="color:var(--faded)">' + interimTranscript + '</em>'
+    : '');
+  el.innerHTML = combined || '<span class="placeholder">Přepis se zobrazí zde…</span>';
+}
+
+async function saveEntry() {
+  const text = finalTranscript.trim();
+  if (!text) return;
+
+  const btn = document.getElementById('btnSave');
+  btn.disabled = true;
+  btn.textContent = 'Ukládám…';
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' });
+  const timeStr = now.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+  const entryText = '\n[' + dateStr + ', ' + timeStr + ']\n' + text + '\n';
+
+  const entry = { date: now.toISOString(), text, synced: false, id: Date.now() };
+
+  try {
+    const resp = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ entry: entryText })
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      entry.synced = true;
+      showToast('Uloženo do Google Docs ✓');
+      setStatus(true, 'Naposledy uloženo ' + timeStr);
+    } else {
+      throw new Error(result.error || 'Neznámá chyba');
+    }
+  } catch (err) {
+    entry.error = err.message;
+    showToast('Chyba – uloženo lokálně');
+    setStatus(false, 'Problém s připojením');
+  }
+
+  entries.unshift(entry);
+  localStorage.setItem('diaryEntries', JSON.stringify(entries.slice(0, 50)));
+  renderEntries();
+
+  finalTranscript = '';
+  document.getElementById('liveTranscript').innerHTML = '<span class="placeholder">Přepis se zobrazí zde…</span>';
+  btn.textContent = 'Uložit záznam do Google Docs';
+}
+
+function renderEntries() {
+  const list = document.getElementById('entriesList');
+  if (!entries.length) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--faded);text-align:center;padding:12px 0;">Žádné záznamy zatím</div>';
+    return;
+  }
+  list.innerHTML = entries.slice(0, 10).map(e => {
+    const d = new Date(e.date);
+    const dateStr = d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'short' });
+    const timeStr = d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+    return '<div class="entry-card">' +
+      '<div class="entry-meta">' + dateStr + ' · ' + timeStr + '</div>' +
+      '<div class="entry-text">' + e.text + '</div>' +
+      (e.synced ? '<div class="entry-synced">↑ synchronizováno</div>' : '') +
+      (e.error ? '<div class="entry-error">⚠ ' + e.error + '</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+</script>
+</body>
+</html>
