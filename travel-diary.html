@@ -238,66 +238,66 @@ function toggleRecording() {
 
 // ═══════════════════════════════════════════════════════════════
 // SPUŠTĚNÍ NAHRÁVÁNÍ
-// Vytvoří objekt SpeechRecognition a nastaví jeho chování
+// Na mobilu continuous=true způsobuje duplikování – používáme
+// vlastní restart: po každém finálním výsledku vytvoříme nový
+// objekt recognition, čímž zajistíme čisté výsledky bez překrytí
 // ═══════════════════════════════════════════════════════════════
 function startRecording() {
-  // Načteme SpeechRecognition – různé prohlížeče ho mají pod různým názvem
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return; // prohlížeč nepodporuje → konec
+  if (!SpeechRecognition) return;
 
-  // Resetujeme všechny přepisy před novým nahráváním
   finalTranscript = '';
   interimTranscript = '';
   lastResultIndex = 0;
 
-  // Vytvoříme nový objekt pro rozpoznávání řeči
+  isRecording = true;
+  document.getElementById('recordBtn').classList.add('recording');
+  document.getElementById('recordLabel').textContent = 'Nahrávám… klepni pro stop';
+  document.getElementById('liveTranscript').classList.add('active');
+
+  startSession(); // spustíme první session
+}
+
+function startSession() {
+  // Každá session je samostatný objekt – při restartu nevracíme staré výsledky
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SpeechRecognition();
-  recognition.lang = 'cs-CZ';          // jazyk: čeština
-  recognition.continuous = true;        // nahrávej nepřetržitě, nezastavuj po větě
-  recognition.interimResults = true;    // ukazuj průběžné výsledky (ještě nepotvrzená slova)
-  recognition.maxAlternatives = 1;      // chceme jen jeden nejlepší přepis, ne více variant
+  recognition.lang = 'cs-CZ';
+  recognition.continuous = false;       // VYPNUTO – řídíme restart sami
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
 
-  // ── Callback: přišly nové výsledky přepisu ──
   recognition.onresult = (e) => {
-    interimTranscript = ''; // vždy resetujeme průběžný přepis
-
-    // Procházíme pouze nové výsledky (od posledního zpracovaného indexu)
-    for (let i = e.resultIndex; i < e.results.length; i++) {
+    interimTranscript = '';
+    for (let i = 0; i < e.results.length; i++) {
       if (e.results[i].isFinal) {
-        // Finální výsledek – Speech API ho potvrdilo jako správný
-        // Kontrola indexu zabraňuje zdvojení slov při restartu recognition
-        if (i >= lastResultIndex) {
-          finalTranscript += e.results[i][0].transcript + ' ';
-          lastResultIndex = i + 1; // posuneme ukazatel
-        }
+        // Finální výsledek této session – přidáme jednou a jen jednou
+        finalTranscript += e.results[i][0].transcript + ' ';
       } else {
-        // Průběžný výsledek – ještě se může změnit, zobrazíme kurzívou
         interimTranscript += e.results[i][0].transcript;
       }
     }
-    updateTranscriptDisplay(); // aktualizuj co uživatel vidí na obrazovce
+    updateTranscriptDisplay();
   };
 
-  // ── Callback: nastala chyba ──
   recognition.onerror = (e) => {
-    if (e.error === 'no-speech') return; // ticho není chyba, jen ignorujeme
+    if (e.error === 'no-speech') {
+      // Ticho – restartujeme session pokud ještě nahráváme
+      if (isRecording) startSession();
+      return;
+    }
     showToast('Chyba: ' + e.error);
     stopRecording();
   };
 
-  // ── Callback: recognition se zastavil (po pauze to dělá automaticky) ──
   recognition.onend = () => {
-    // Pokud uživatel ještě nestiskl Stop, restartujeme nahrávání
-    // lastResultIndex NEresetujeme – díky tomu se slova nezdvojují
-    if (isRecording) recognition.start();
+    interimTranscript = ''; // průběžný přepis vymažeme po každé session
+    updateTranscriptDisplay();
+    // Restartujeme novou čistou session
+    if (isRecording) startSession();
   };
 
-  // Spustíme nahrávání a aktualizujeme UI
   recognition.start();
-  isRecording = true;
-  document.getElementById('recordBtn').classList.add('recording');   // červené tlačítko + animace
-  document.getElementById('recordLabel').textContent = 'Nahrávám… klepni pro stop';
-  document.getElementById('liveTranscript').classList.add('active'); // červený rámeček
 }
 
 
@@ -362,18 +362,12 @@ async function saveEntry() {
   try {
     // Pošleme POST požadavek na Google Apps Script
     // fetch = funkce pro komunikaci se serverem přes internet
-    // Použijeme no-cors mode přes formulářová data – obchází CORS omezení prohlížeče
-    // Apps Script přijme data a zapíše je, i když nevrátí čitelnou odpověď
-    const formData = new FormData();
-    formData.append('entry', entryText);
+    // Použijeme GET požadavek s textem zakódovaným v URL – CORS GET vždy povoluje
+    const url = SCRIPT_URL + '?entry=' + encodeURIComponent(entryText);
+    const resp = await fetch(url, { method: 'GET' });
 
-    await fetch(SCRIPT_URL, {
-      method: 'POST',                // typ požadavku: posíláme data
-      body: formData                 // formulářová data – nevyžadují CORS preflight
-    });
-
-    // S no-cors nemůžeme číst odpověď, ale pokud fetch nehodil chybu, zápis proběhl
-    const result = { ok: true };
+    // Přečteme odpověď ze serveru
+    const result = await resp.json();
 
     if (result.ok) {
       // Úspěch – označíme záznam jako synchronizovaný
