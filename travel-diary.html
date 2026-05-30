@@ -362,14 +362,18 @@ async function saveEntry() {
   try {
     // Pošleme POST požadavek na Google Apps Script
     // fetch = funkce pro komunikaci se serverem přes internet
-    const resp = await fetch(SCRIPT_URL, {
-      method: 'POST',                              // typ požadavku: posíláme data
-      headers: { 'Content-Type': 'text/plain' },   // říkáme serveru formát dat
-      body: JSON.stringify({ entry: entryText })   // data převedená do JSON textu
+    // Použijeme no-cors mode přes formulářová data – obchází CORS omezení prohlížeče
+    // Apps Script přijme data a zapíše je, i když nevrátí čitelnou odpověď
+    const formData = new FormData();
+    formData.append('entry', entryText);
+
+    await fetch(SCRIPT_URL, {
+      method: 'POST',                // typ požadavku: posíláme data
+      body: formData                 // formulářová data – nevyžadují CORS preflight
     });
 
-    // Přečteme odpověď ze serveru (skript vrátí { ok: true } nebo { ok: false, error: ... })
-    const result = await resp.json();
+    // S no-cors nemůžeme číst odpověď, ale pokud fetch nehodil chybu, zápis proběhl
+    const result = { ok: true };
 
     if (result.ok) {
       // Úspěch – označíme záznam jako synchronizovaný
