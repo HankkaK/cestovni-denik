@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Cestovní deník</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a1612">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Deník">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -160,88 +165,166 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzz7AHVe-0NhN7Rziw92ZHjfxFkVpv-Kc-dRrXfQO6b7-QCqeCk7UPYznGKfYQQGLAo/exec';
+// ═══════════════════════════════════════════════════════════════
+// GLOBÁLNÍ PROMĚNNÉ
+// Tyto proměnné jsou dostupné v celém skriptu po celou dobu běhu
+// ═══════════════════════════════════════════════════════════════
 
+// URL Google Apps Scriptu, který zapisuje do Google Docs
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw92OtT2AmDn9Es3MEQnO5HOyhvXr4phMcBU7o0ZzxCdrCWeUpGgsIgWkF2A6UXnc49ow/exec';
+
+// Objekt pro práci s rozpoznáváním řeči (null = zatím nevytvořen)
 let recognition = null;
+
+// Příznak: právě teď nahráváme? true/false
 let isRecording = false;
+
+// Hotový (finální) přepis – slova která Speech API už potvrdilo jako správná
 let finalTranscript = '';
+
+// Průběžný přepis – slova která Speech API ještě zpracovává (mohou se změnit)
 let interimTranscript = '';
+
+// Index posledního zpracovaného výsledku – zabraňuje zdvojování slov při restartu
+let lastResultIndex = 0;
+
+// Záznamy uložené lokálně v telefonu (záloha kdyby nefungoval internet)
+// localStorage je úložiště přímo v prohlížeči, přežije zavření appky
 let entries = JSON.parse(localStorage.getItem('diaryEntries') || '[]');
 
+
+// ═══════════════════════════════════════════════════════════════
+// INICIALIZACE – spustí se automaticky po načtení stránky
+// ═══════════════════════════════════════════════════════════════
 window.onload = () => {
-  renderEntries();
-  checkSpeechSupport();
-  setStatus(true, 'Připojeno k Google Docs ✓');
+  renderEntries();                            // zobraz uložené záznamy
+  checkSpeechSupport();                       // zkontroluj jestli prohlížeč umí nahrávat
+  setStatus(true, 'Připojeno k Google Docs ✓'); // nastav zelený status
 };
 
+
+// ═══════════════════════════════════════════════════════════════
+// KONTROLA PODPORY MIKROFONU
+// Některé prohlížeče (starší, nebo Firefox) neumí Web Speech API
+// ═══════════════════════════════════════════════════════════════
 function checkSpeechSupport() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    // Prohlížeč nepodporuje nahrávání – vizuálně deaktivujeme tlačítko
     document.getElementById('recordBtn').style.opacity = '0.4';
     document.getElementById('recordLabel').textContent = 'Prohlížeč nepodporuje nahrávání';
     showToast('Použij Chrome nebo Samsung Internet');
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// STATUS BAR – zelená/červená tečka s popisem stavu
+// ═══════════════════════════════════════════════════════════════
 function setStatus(ok, text) {
+  // ok=true → zelená tečka, ok=false → červená tečka
   document.getElementById('statusDot').className = 'status-dot ' + (ok ? 'ok' : 'error');
   document.getElementById('statusText').textContent = text;
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// PŘEPÍNAČ NAHRÁVÁNÍ – reaguje na klepnutí na mikrofon
+// ═══════════════════════════════════════════════════════════════
 function toggleRecording() {
+  // Pokud nahráváme → zastav, pokud ne → začni
   isRecording ? stopRecording() : startRecording();
 }
 
-function startRecording() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return;
 
+// ═══════════════════════════════════════════════════════════════
+// SPUŠTĚNÍ NAHRÁVÁNÍ
+// Vytvoří objekt SpeechRecognition a nastaví jeho chování
+// ═══════════════════════════════════════════════════════════════
+function startRecording() {
+  // Načteme SpeechRecognition – různé prohlížeče ho mají pod různým názvem
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return; // prohlížeč nepodporuje → konec
+
+  // Resetujeme všechny přepisy před novým nahráváním
   finalTranscript = '';
   interimTranscript = '';
+  lastResultIndex = 0;
 
+  // Vytvoříme nový objekt pro rozpoznávání řeči
   recognition = new SpeechRecognition();
-  recognition.lang = 'cs-CZ';
-  recognition.continuous = true;
-  recognition.interimResults = true;
+  recognition.lang = 'cs-CZ';          // jazyk: čeština
+  recognition.continuous = true;        // nahrávej nepřetržitě, nezastavuj po větě
+  recognition.interimResults = true;    // ukazuj průběžné výsledky (ještě nepotvrzená slova)
+  recognition.maxAlternatives = 1;      // chceme jen jeden nejlepší přepis, ne více variant
 
+  // ── Callback: přišly nové výsledky přepisu ──
   recognition.onresult = (e) => {
-    interimTranscript = '';
+    interimTranscript = ''; // vždy resetujeme průběžný přepis
+
+    // Procházíme pouze nové výsledky (od posledního zpracovaného indexu)
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) {
-        finalTranscript += e.results[i][0].transcript + ' ';
+        // Finální výsledek – Speech API ho potvrdilo jako správný
+        // Kontrola indexu zabraňuje zdvojení slov při restartu recognition
+        if (i >= lastResultIndex) {
+          finalTranscript += e.results[i][0].transcript + ' ';
+          lastResultIndex = i + 1; // posuneme ukazatel
+        }
       } else {
+        // Průběžný výsledek – ještě se může změnit, zobrazíme kurzívou
         interimTranscript += e.results[i][0].transcript;
       }
     }
-    updateTranscriptDisplay();
+    updateTranscriptDisplay(); // aktualizuj co uživatel vidí na obrazovce
   };
 
+  // ── Callback: nastala chyba ──
   recognition.onerror = (e) => {
-    if (e.error !== 'no-speech') showToast('Chyba: ' + e.error);
+    if (e.error === 'no-speech') return; // ticho není chyba, jen ignorujeme
+    showToast('Chyba: ' + e.error);
     stopRecording();
   };
 
+  // ── Callback: recognition se zastavil (po pauze to dělá automaticky) ──
   recognition.onend = () => {
+    // Pokud uživatel ještě nestiskl Stop, restartujeme nahrávání
+    // lastResultIndex NEresetujeme – díky tomu se slova nezdvojují
     if (isRecording) recognition.start();
   };
 
+  // Spustíme nahrávání a aktualizujeme UI
   recognition.start();
   isRecording = true;
-  document.getElementById('recordBtn').classList.add('recording');
+  document.getElementById('recordBtn').classList.add('recording');   // červené tlačítko + animace
   document.getElementById('recordLabel').textContent = 'Nahrávám… klepni pro stop';
-  document.getElementById('liveTranscript').classList.add('active');
+  document.getElementById('liveTranscript').classList.add('active'); // červený rámeček
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// ZASTAVENÍ NAHRÁVÁNÍ
+// ═══════════════════════════════════════════════════════════════
 function stopRecording() {
-  if (recognition) { recognition.stop(); recognition = null; }
+  // Nejdřív nastavíme příznak na false – jinak by onend znovu spustil nahrávání
   isRecording = false;
+  if (recognition) { recognition.stop(); recognition = null; }
+
+  // Vrátíme UI do výchozího stavu
   document.getElementById('recordBtn').classList.remove('recording');
   document.getElementById('recordLabel').textContent = 'Klepni pro nahrávání';
   document.getElementById('liveTranscript').classList.remove('active');
+
+  // Pokud máme nějaký text, aktivujeme tlačítko Uložit
   if (finalTranscript.trim()) {
     document.getElementById('btnSave').disabled = false;
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// AKTUALIZACE ZOBRAZENÍ PŘEPISU
+// Finální text je normální, průběžný text je kurzívou a šedý
+// ═══════════════════════════════════════════════════════════════
 function updateTranscriptDisplay() {
   const el = document.getElementById('liveTranscript');
   const combined = finalTranscript + (interimTranscript
@@ -250,29 +333,46 @@ function updateTranscriptDisplay() {
   el.innerHTML = combined || '<span class="placeholder">Přepis se zobrazí zde…</span>';
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// ULOŽENÍ ZÁZNAMU DO GOOGLE DOCS
+// Sestaví text s datem a pošle ho do Google Apps Scriptu
+// ═══════════════════════════════════════════════════════════════
 async function saveEntry() {
   const text = finalTranscript.trim();
-  if (!text) return;
+  if (!text) return; // nic k uložení
 
+  // Deaktivujeme tlačítko aby nešlo kliknout dvakrát
   const btn = document.getElementById('btnSave');
   btn.disabled = true;
   btn.textContent = 'Ukládám…';
 
+  // Sestavíme datum a čas v českém formátu
   const now = new Date();
   const dateStr = now.toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' });
   const timeStr = now.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+
+  // Výsledný text záznamu – datum na prvním řádku, přepis na druhém
+  // Příklad: "\n[sobota 31. května, 10:06]\nDnes jsme byli v Římě...\n"
   const entryText = '\n[' + dateStr + ', ' + timeStr + ']\n' + text + '\n';
 
+  // Objekt záznamu pro lokální uložení v telefonu
   const entry = { date: now.toISOString(), text, synced: false, id: Date.now() };
 
   try {
+    // Pošleme POST požadavek na Google Apps Script
+    // fetch = funkce pro komunikaci se serverem přes internet
     const resp = await fetch(SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ entry: entryText })
+      method: 'POST',                              // typ požadavku: posíláme data
+      headers: { 'Content-Type': 'text/plain' },   // říkáme serveru formát dat
+      body: JSON.stringify({ entry: entryText })   // data převedená do JSON textu
     });
+
+    // Přečteme odpověď ze serveru (skript vrátí { ok: true } nebo { ok: false, error: ... })
     const result = await resp.json();
+
     if (result.ok) {
+      // Úspěch – označíme záznam jako synchronizovaný
       entry.synced = true;
       showToast('Uloženo do Google Docs ✓');
       setStatus(true, 'Naposledy uloženo ' + timeStr);
@@ -280,26 +380,39 @@ async function saveEntry() {
       throw new Error(result.error || 'Neznámá chyba');
     }
   } catch (err) {
+    // Něco se pokazilo (chyba internetu, CORS, chyba skriptu...)
     entry.error = err.message;
     showToast('Chyba – uloženo lokálně');
-    setStatus(false, 'Problém s připojením');
+    setStatus(false, 'Problém s připojením: ' + err.message);
   }
 
-  entries.unshift(entry);
+  // Uložíme záznam lokálně v telefonu jako zálohu (max 50 záznamů)
+  entries.unshift(entry); // přidáme na začátek seznamu
   localStorage.setItem('diaryEntries', JSON.stringify(entries.slice(0, 50)));
-  renderEntries();
+  renderEntries(); // aktualizujeme seznam na obrazovce
 
+  // Resetujeme přepis pro další nahrávání
   finalTranscript = '';
+  interimTranscript = '';
+  lastResultIndex = 0;
   document.getElementById('liveTranscript').innerHTML = '<span class="placeholder">Přepis se zobrazí zde…</span>';
   btn.textContent = 'Uložit záznam do Google Docs';
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// ZOBRAZENÍ SEZNAMU ZÁZNAMŮ
+// Vykreslí posledních 10 záznamů pod tlačítkem Uložit
+// ═══════════════════════════════════════════════════════════════
 function renderEntries() {
   const list = document.getElementById('entriesList');
+
   if (!entries.length) {
     list.innerHTML = '<div style="font-size:12px;color:var(--faded);text-align:center;padding:12px 0;">Žádné záznamy zatím</div>';
     return;
   }
+
+  // Projdeme posledních 10 záznamů a vytvoříme HTML kartu pro každý
   list.innerHTML = entries.slice(0, 10).map(e => {
     const d = new Date(e.date);
     const dateStr = d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'short' });
@@ -313,11 +426,27 @@ function renderEntries() {
   }).join('');
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// TOAST NOTIFIKACE
+// Krátká zpráva která se zobrazí dole na obrazovce a zmizí
+// ═══════════════════════════════════════════════════════════════
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2800);
+  t.classList.add('show');                          // animace – vyskočí zdola
+  setTimeout(() => t.classList.remove('show'), 2800); // po 2.8 sekundách zmizí
+}
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// SERVICE WORKER REGISTRACE
+// Service worker je skript běžící na pozadí – zajišťuje offline režim
+// Zaregistruje se jednou a pak funguje automaticky
+// ═══════════════════════════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(err => console.log('SW error:', err));
 }
 </script>
 </body>
