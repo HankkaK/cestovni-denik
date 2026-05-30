@@ -364,7 +364,7 @@ async function saveEntry() {
     // fetch = funkce pro komunikaci se serverem přes internet
     // Použijeme GET požadavek s textem zakódovaným v URL – CORS GET vždy povoluje
     const url = SCRIPT_URL + '?entry=' + encodeURIComponent(entryText);
-    const resp = await fetch(url, { method: 'GET' });
+    const resp = await fetch(url, { method: 'GET', redirect: 'follow' });
 
     // Přečteme odpověď ze serveru
     const result = await resp.json();
